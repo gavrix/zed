@@ -80,7 +80,7 @@ cat > "$HMAPP/Info.json" <<EOF
 EOF
 cat > "$HMAPP/licenses/SOURCE.txt" <<EOF
 Zed for Hyprmux $VERSION is Zed with a GPUI backend that draws its windows into
-Hyprmux tiles. Source: https://github.com/gavrix/zed/tree/hyprmux-v$VERSION
+Hyprmux tiles. Source: https://github.com/gavrix/zed/tree/v$VERSION
 Zed is licensed under GPL-3.0-or-later and Apache-2.0 (see the files next to this one).
 Built from commit $(git rev-parse HEAD).
 EOF

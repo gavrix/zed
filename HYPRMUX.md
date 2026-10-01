@@ -48,7 +48,7 @@ You need Hyprmux 0.3.0 or later on an Apple-silicon Mac. To update, replace
 
 ```sh
 script/bundle-hyprmux              # build, sign, notarize, zip
-script/bundle-hyprmux 1.24.0       # set the version in Info.json and the file name
+script/bundle-hyprmux 1.24.0-hyprmux.2   # the version: Info.json, the file name, the tag
 HYPRMUX_SKIP_NOTARIZATION=1 script/bundle-hyprmux   # local test build
 ```
 
