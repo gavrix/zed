@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# Build "Zed for Hyprmux": Zed.hmapp, signed with a Developer ID, notarized, zipped.
+#
+# Usage: script/bundle-hyprmux [version]
+#
+# Output: target/hyprmux-bundle/Zed-for-Hyprmux-VERSION-aarch64.zip and its .sha256.
+# Install: unzip, move Zed.hmapp into ~/.config/hyprmux/apps/, run `hyprmuxctl apps refresh`.
+#
+# Environment:
+#   HYPRMUX_SIGN_IDENTITY      Developer ID Application identity or SHA-1 (default: the only one).
+#   HYPRMUX_NOTARY_PROFILE     notarytool Keychain profile (default: hyprmux-notary).
+#   HYPRMUX_SKIP_NOTARIZATION  1: sign, but don't notarize (for local tests).
+#   HYPRMUX_SKIP_BUILD         1: package the binary already in target/hyprmux.
+#
+# The build is the nightly channel with auto-update off:
+#   - nightly keeps its database, credentials, and single-instance port apart from
+#     a stable Zed, and downloads remote servers that match a build from main;
+#   - auto-update would replace this fork with upstream Zed.
+# A process Hyprmux launches skips the single-instance check (crates/zed/src/main.rs),
+# so every launch gets its own process and fills its own tile.
+set -euo pipefail
+
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+ROOT="$(pwd)"
+
+ZED_VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' crates/zed/Cargo.toml | head -n 1)"
+VERSION="${1:-$ZED_VERSION}"
+if [[ ! "$VERSION" =~ ^[0-9]+([.][0-9]+){1,2}([-+][0-9A-Za-z.-]+)?$ ]]; then
+  echo "error: version must look like 1.24.0 or 1.24.0-hyprmux.1" >&2
+  exit 1
+fi
+
+PROFILE=hyprmux
+TARGET_TRIPLE=aarch64-apple-darwin
+BINARY="target/$TARGET_TRIPLE/$PROFILE/zed"
+OUT="target/hyprmux-bundle"
+HMAPP="$OUT/Zed.hmapp"
+ZIP="$OUT/Zed-for-Hyprmux-$VERSION-aarch64.zip"
+ENTITLEMENTS="crates/zed/resources/zed.entitlements"
+NOTARY_PROFILE="${HYPRMUX_NOTARY_PROFILE:-hyprmux-notary}"
+
+IDENTITY="${HYPRMUX_SIGN_IDENTITY:-}"
+if [[ -z "$IDENTITY" ]]; then
+  IDENTITIES="$(security find-identity -v -p codesigning 2>/dev/null \
+    | sed -n 's/.*"\(Developer ID Application:.*\)"/\1/p')"
+  COUNT="$(printf '%s\n' "$IDENTITIES" | awk 'NF { count++ } END { print count + 0 }')"
+  if [[ "$COUNT" -ne 1 ]]; then
+    echo "error: expected one Developer ID Application identity, found $COUNT" >&2
+    echo "set HYPRMUX_SIGN_IDENTITY to select one" >&2
+    exit 1
+  fi
+  IDENTITY="$(printf '%s\n' "$IDENTITIES" | awk 'NF { print; exit }')"
+fi
+
+if [[ "${HYPRMUX_SKIP_BUILD:-0}" != 1 ]]; then
+  echo "Building Zed $ZED_VERSION for Hyprmux ($PROFILE profile, nightly channel)"
+  export ZED_RELEASE_CHANNEL=nightly
+  export ZED_UPDATE_EXPLANATION="This is Zed for Hyprmux. Download new versions from https://github.com/gavrix/zed/releases."
+  export CXXFLAGS="-stdlib=libc++"
+  cargo build --profile "$PROFILE" --package zed --bin zed --target "$TARGET_TRIPLE"
+fi
+[[ -x "$BINARY" ]] || { echo "error: missing $BINARY" >&2; exit 1; }
+
+echo "Assembling $HMAPP"
+rm -rf "$HMAPP" "$ZIP" "$ZIP.sha256"
+mkdir -p "$HMAPP/bin" "$HMAPP/licenses"
+cp "$BINARY" "$HMAPP/bin/zed"
+cp LICENSE-GPL LICENSE-APACHE "$HMAPP/licenses/"
+sips -z 256 256 crates/zed/resources/app-icon.png --out "$HMAPP/icon.png" >/dev/null
+cat > "$HMAPP/Info.json" <<EOF
+{
+  "format": 1,
+  "id": "dev.gavrix.zed-hyprmux",
+  "name": "Zed",
+  "kind": "native",
+  "version": "$VERSION",
+  "exec": "bin/zed",
+  "args": ["{args}"]
+}
+EOF
+cat > "$HMAPP/licenses/SOURCE.txt" <<EOF
+Zed for Hyprmux $VERSION is Zed with a GPUI backend that draws its windows into
+Hyprmux tiles. Source: https://github.com/gavrix/zed/tree/hyprmux-v$VERSION
+Zed is licensed under GPL-3.0-or-later and Apache-2.0 (see the files next to this one).
+Built from commit $(git rev-parse HEAD).
+EOF
+
+echo "Signing with: $IDENTITY"
+codesign --force --timestamp --options runtime --entitlements "$ENTITLEMENTS" \
+  --identifier dev.gavrix.zed-hyprmux --sign "$IDENTITY" "$HMAPP/bin/zed"
+codesign --verify --strict --verbose=2 "$HMAPP/bin/zed"
+
+ditto -c -k --keepParent "$HMAPP" "$ZIP"
+
+if [[ "${HYPRMUX_SKIP_NOTARIZATION:-0}" != 1 ]]; then
+  echo "Notarizing (profile $NOTARY_PROFILE)"
+  xcrun notarytool submit "$ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
+  # A bare executable can't carry a stapled ticket; Gatekeeper looks it up online.
+fi
+
+(cd "$OUT" && shasum -a 256 "$(basename "$ZIP")" > "$(basename "$ZIP").sha256")
+echo "Done: $ROOT/$ZIP"
+cat "$ZIP.sha256"

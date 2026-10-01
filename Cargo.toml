@@ -1133,6 +1133,12 @@ debug = "full"
 lto = false
 codegen-units = 16
 
+# Zed for Hyprmux (script/bundle-hyprmux).
+[profile.hyprmux]
+inherits = "release"
+debug = false
+strip = true
+
 [workspace.lints.rust]
 unexpected_cfgs = { level = "allow" }
 

@@ -357,8 +357,13 @@ fn main() {
 
     let (open_listener, mut open_rx) = OpenListener::new();
 
+    // Hyprmux gives each process it launches a token and a tile of its own. Handing
+    // the paths to a running instance would leave that tile empty.
+    let launched_by_hyprmux =
+        std::env::var("HYPRMUX_LAUNCH_TOKEN").is_ok_and(|token| !token.is_empty());
     let failed_single_instance_check = if *zed_env_vars::ZED_STATELESS
         || *release_channel::RELEASE_CHANNEL == ReleaseChannel::Dev
+        || launched_by_hyprmux
     {
         false
     } else {
