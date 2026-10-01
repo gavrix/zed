@@ -623,6 +623,10 @@ impl Platform for MacPlatform {
     }
 
     fn activate(&self, ignoring_other_apps: bool) {
+        // Activating would take the keyboard from Hyprmux, and with it the tiles' input.
+        if crate::hyprmux::enabled() {
+            return;
+        }
         unsafe {
             let app = NSApplication::sharedApplication(nil);
             app.activateIgnoringOtherApps_(ignoring_other_apps.to_objc());
@@ -630,6 +634,9 @@ impl Platform for MacPlatform {
     }
 
     fn hide(&self) {
+        if crate::hyprmux::enabled() {
+            return;
+        }
         unsafe {
             let app = NSApplication::sharedApplication(nil);
             let _: () = msg_send![app, hide: nil];
@@ -637,6 +644,9 @@ impl Platform for MacPlatform {
     }
 
     fn hide_other_apps(&self) {
+        if crate::hyprmux::enabled() {
+            return;
+        }
         unsafe {
             let app = NSApplication::sharedApplication(nil);
             let _: () = msg_send![app, hideOtherApplications: nil];
@@ -674,12 +684,18 @@ impl Platform for MacPlatform {
     }
 
     fn active_window(&self) -> Option<AnyWindowHandle> {
+        if crate::hyprmux::enabled() {
+            return crate::hyprmux::active_window();
+        }
         MacWindow::active_window()
     }
 
     // Returns the windows ordered front-to-back, meaning that the active
     // window is the first one in the returned vec.
     fn window_stack(&self) -> Option<Vec<AnyWindowHandle>> {
+        if crate::hyprmux::enabled() {
+            return Some(crate::hyprmux::window_stack());
+        }
         Some(MacWindow::ordered_windows())
     }
 
@@ -692,6 +708,14 @@ impl Platform for MacPlatform {
         // gpui's in-window popovers.
         if let WindowKind::AnchoredPopup(_) = options.kind {
             return Err(PopupNotSupportedError.into());
+        }
+
+        if crate::hyprmux::enabled() {
+            let renderer_context = self.0.lock().renderer_context.clone();
+            match crate::hyprmux::HyprmuxWindow::open(handle, &options, renderer_context) {
+                Ok(window) => return Ok(Box::new(window)),
+                Err(error) => log::error!("{error:#}; opening a native window instead"),
+            }
         }
 
         let (cursor_visible, foreground_executor, background_executor, renderer_context) = {
@@ -819,6 +843,12 @@ impl Platform for MacPlatform {
     ) -> oneshot::Receiver<Result<Option<Vec<PathBuf>>>> {
         use objc2_foundation::NSString;
 
+        if crate::hyprmux::enabled() {
+            if let Some(rx) = crate::hyprmux::prompt_for_paths(&options) {
+                return rx;
+            }
+        }
+
         let marker = self.1;
         let (done_tx, done_rx) = oneshot::channel();
         self.foreground_executor()
@@ -867,6 +897,12 @@ impl Platform for MacPlatform {
         suggested_name: Option<&str>,
     ) -> oneshot::Receiver<Result<Option<PathBuf>>> {
         use objc2_foundation::{NSString, NSURL};
+
+        if crate::hyprmux::enabled() {
+            if let Some(rx) = crate::hyprmux::prompt_for_new_path(directory, suggested_name) {
+                return rx;
+            }
+        }
 
         let url = NSURL::from_directory_path(directory);
         let suggested_name = suggested_name.map(NSString::from_str);
@@ -1127,6 +1163,10 @@ impl Platform for MacPlatform {
     /// Match cursor style to one of the styles available
     /// in macOS's [NSCursor](https://developer.apple.com/documentation/appkit/nscursor).
     fn set_cursor_style(&self, style: CursorStyle) {
+        if crate::hyprmux::enabled() {
+            crate::hyprmux::set_cursor_style(style);
+            return;
+        }
         unsafe {
             set_active_window_cursor_style(style);
         }
@@ -1317,7 +1357,12 @@ extern "C" fn will_finish_launching(_this: &mut Object, _: Sel, _: id) {
 extern "C" fn did_finish_launching(this: &mut Object, _: Sel, _: id) {
     unsafe {
         let app: id = msg_send![APP_CLASS, sharedApplication];
-        app.setActivationPolicy_(NSApplicationActivationPolicyRegular);
+        // In Hyprmux the tiles are the app's windows; it gets no Dock icon or menu bar.
+        if crate::hyprmux::enabled() {
+            app.setActivationPolicy_(cocoa::appkit::NSApplicationActivationPolicy::NSApplicationActivationPolicyAccessory);
+        } else {
+            app.setActivationPolicy_(NSApplicationActivationPolicyRegular);
+        }
 
         let notification_center: *mut Object =
             msg_send![class!(NSNotificationCenter), defaultCenter];

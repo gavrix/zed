@@ -7693,9 +7693,11 @@ dependencies = [
  "gpui",
  "gpui_apple",
  "gpui_util",
+ "hyprmux-client",
  "image",
  "itertools 0.14.0",
  "log",
+ "metal",
  "objc",
  "objc2 0.6.3",
  "objc2-app-kit 0.3.2",
@@ -7708,6 +7710,7 @@ dependencies = [
  "pathfinder_geometry",
  "raw-window-handle",
  "semver",
+ "serde_json",
  "smallvec",
  "strum 0.28.0",
  "uuid",
@@ -8547,6 +8550,14 @@ dependencies = [
  "tokio",
  "tower-service",
  "tracing",
+]
+
+[[package]]
+name = "hyprmux-client"
+version = "0.1.0"
+source = "git+https://github.com/gavrix/hyprmux?rev=caa1885edc357d16e133ba91ffb637c6118f479f#caa1885edc357d16e133ba91ffb637c6118f479f"
+dependencies = [
+ "block2 0.6.2",
 ]
 
 [[package]]

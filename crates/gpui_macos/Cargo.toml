@@ -42,6 +42,10 @@ foreign-types.workspace = true
 futures.workspace = true
 gpui_apple.workspace = true
 gpui_util.workspace = true
+# Tiles in Hyprmux (src/hyprmux.rs): https://github.com/gavrix/hyprmux/tree/master/clients/rust/hyprmux-client
+hyprmux-client = { git = "https://github.com/gavrix/hyprmux", rev = "caa1885edc357d16e133ba91ffb637c6118f479f" }
+metal.workspace = true
+serde_json.workspace = true
 image.workspace = true
 itertools.workspace = true
 log.workspace = true

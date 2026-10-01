@@ -207,6 +207,61 @@ impl MetalRenderer {
         Self::new_internal(device, None, true, instance_buffer_pool)
     }
 
+    /// Creates a renderer without a layer, for drawing into textures the caller owns,
+    /// such as an IOSurface swapchain shared with a compositor process. Draw with
+    /// [`Self::draw_to_texture`]; size path textures with [`Self::update_drawable_size`].
+    pub fn new_offscreen(instance_buffer_pool: Arc<Mutex<InstanceBufferPool>>, transparent: bool) -> Self {
+        let device = Self::create_device();
+        Self::new_internal(device, None, !transparent, instance_buffer_pool)
+    }
+
+    /// Wraps a BGRA8 IOSurface as a render-target texture on this renderer's device.
+    ///
+    /// # Safety
+    /// `surface` must be a valid `IOSurfaceRef` that outlives the texture.
+    pub unsafe fn texture_for_iosurface(&self, surface: *mut c_void, width: u64, height: u64) -> metal::Texture {
+        let descriptor = metal::TextureDescriptor::new();
+        descriptor.set_width(width);
+        descriptor.set_height(height);
+        descriptor.set_pixel_format(MTLPixelFormat::BGRA8Unorm);
+        descriptor.set_storage_mode(metal::MTLStorageMode::Shared);
+        descriptor.set_usage(metal::MTLTextureUsage::RenderTarget | metal::MTLTextureUsage::ShaderRead);
+        // -[MTLDevice newTextureWithDescriptor:iosurface:plane:], sent directly: the
+        // metal crate has no binding, and an opaque IOSurfaceRef doesn't match
+        // objc2's checked encodings.
+        unsafe extern "C" {
+            fn objc_msgSend();
+            fn sel_registerName(name: *const std::ffi::c_char) -> *const c_void;
+        }
+        type NewTexture = unsafe extern "C" fn(*mut c_void, *const c_void, *mut c_void, *mut c_void, NSUInteger) -> *mut c_void;
+        unsafe {
+            let send: NewTexture = mem::transmute(objc_msgSend as *const ());
+            let selector = sel_registerName(c"newTextureWithDescriptor:iosurface:plane:".as_ptr());
+            let raw = send(
+                self.device.as_ptr() as *mut c_void,
+                selector,
+                descriptor.as_ptr() as *mut c_void,
+                surface,
+                0,
+            );
+            metal::Texture::from_ptr(raw as *mut metal::MTLTexture)
+        }
+    }
+
+    /// Encodes `scene` into `texture` and returns the command buffer, not yet
+    /// committed. Callers add a completion handler, so they hand the texture's
+    /// storage to another process only once the GPU is done, then commit.
+    pub fn draw_to_texture(&mut self, scene: &Scene, texture: &metal::TextureRef) -> Option<metal::CommandBuffer> {
+        let viewport_size: Size<DevicePixels> = size((texture.width() as i32).into(), (texture.height() as i32).into());
+        match self.render_frame(scene, texture, viewport_size) {
+            Ok(command_buffer) => Some(command_buffer),
+            Err(error) => {
+                log::error!("failed to render: {error:#}");
+                None
+            }
+        }
+    }
+
     #[cfg(target_os = "macos")]
     fn create_device() -> metal::Device {
         // Prefer low‐power integrated GPUs on Intel Mac. On Apple

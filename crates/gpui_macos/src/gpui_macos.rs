@@ -29,6 +29,7 @@ mod open_type;
 #[cfg(feature = "font-kit")]
 mod text_system;
 
+mod hyprmux;
 mod platform;
 mod window;
 mod window_appearance;
